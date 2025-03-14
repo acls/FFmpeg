@@ -121,7 +121,8 @@ static void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVPacket *pkt,
     fprintf(stderr, "avcodec_send_packet2\n");
     if (ret < 0) {
         fprintf(stderr, "Error sending a packet for decoding: %d\n", ret);
-        exit(1);
+        // exit(1);
+        return;
     }
 
     fprintf(stderr, "ret %d\n", ret);
