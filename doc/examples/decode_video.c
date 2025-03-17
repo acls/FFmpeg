@@ -33,6 +33,156 @@
 #include <string.h>
 
 #include <libavcodec/avcodec.h>
+#include <libswscale/swscale.h>
+#include <libavcodec/mjpeg.h>
+
+
+
+struct Decoder {
+    // AVDictionary        *options;
+    AVCodecContext      *c;
+    AVFrame             *frame;
+
+    // AVFrame             *dstFrame;
+    // SwsContext          *swsCtx;
+} Decoder;
+
+static int decoder_init(struct Decoder* d) {
+    const AVCodec *codec;
+
+    codec = avcodec_find_decoder(AV_CODEC_ID_H264);
+    if (!codec) {
+        fprintf(stderr, "Codec not found\n");
+        return -1;
+    }
+
+    d->c = avcodec_alloc_context3(codec);
+    if (!d->c) {
+        fprintf(stderr, "Could not allocate video codec context\n");
+        return -1;
+    }
+
+    if (avcodec_open2(d->c, codec, NULL) < 0) {
+        fprintf(stderr, "Could not open codec\n");
+        return -1;
+    }
+
+    d->frame = av_frame_alloc();
+    if (!d->frame) {
+        fprintf(stderr, "Could not allocate video frame\n");
+        return -1;
+    }
+
+    return 0;
+}
+static void decoder_free(struct Decoder* d) {
+    avcodec_free_context(&d->c);
+    av_frame_free(&d->frame);
+}
+
+static int decode(struct Decoder *d, AVPacket *pkt,
+                   const char *filename)
+{
+    // char filename_buf[1024];
+    int ret;
+
+    // dump(pkt->size, pkt->data);
+
+    fprintf(stderr, "avcodec_send_packet\n");
+    ret = avcodec_send_packet(d->c, pkt);
+    fprintf(stderr, "avcodec_send_packet2\n");
+    if (ret < 0) {
+        return ret;
+    }
+
+    // while (ret >= 0) {
+    //     fprintf(stderr, "while (ret >= 0) %d\n", ret);
+    //     ret = avcodec_receive_frame(d->c, d->frame);
+    //     if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+    //         fprintf(stderr, "avcodec_receive_frame ret %d\n", ret);
+    //         return 0;
+    //     } else if (ret < 0) {
+    //         fprintf(stderr, "Error during decoding\n");
+    //         return -1;
+    //     }
+    //     // printf("saving frame %3"PRId64"\n", d->c->frame_num);
+    //     // fflush(stdout);
+    //     // /* the picture is allocated by the d-> no need to
+    //     //    free it */
+    //     // snprintf(filename_buf, sizeof(filename_buf),
+    //     //          "%s-%"PRId64, filename, d->c->frame_num);
+    //     // fprintf(stderr, "pgm_save %s\n", filename);
+    //     // pgm_save(d->frame->data[0], d->frame->linesize[0],
+    //     //          d->frame->width, d->frame->height, filename_buf);
+    //     fprintf(stderr, "d->frame height %d width %d.\n", d->frame->height, d->frame->width);
+    // }
+
+    ret = avcodec_receive_frame(d->c, d->frame);
+	if (ret < 0) {
+        return 0;
+	}
+
+    fprintf(stderr, "d->frame height %d width %d.\n", d->frame->height, d->frame->width);
+
+    // // if frame size has changed, allocate needed objects
+    // if (d->dstFrame == NULL || d->dstFrame->width != d->frame->width || d->dstFrame->height != d->frame->height) {
+    //     if (d->dstFrame != NULL) {
+    //         av_frame_free(&d->dstFrame);
+    //     }
+    //
+    //     if (d->swsCtx != NULL) {
+    //         sws_freeContext(d->swsCtx);
+    //     }
+    //
+    //     d->dstFrame = av_frame_alloc();
+    //     d->dstFrame->format = AV_PIX_FMT_RGBA;
+    //     d->dstFrame->width = d->frame->width;
+    //     d->dstFrame->height = d->frame->height;
+    //     d->dstFrame->color_range = AVCOL_RANGE_JPEG;
+    //     ret = av_frame_get_buffer(d->dstFrame, 1);
+    //     if (ret < 0) {
+    //         fprintf(stderr, "av_frame_get_buffer() failed\n");
+    //         return -1;
+    //     }
+    //
+    //     d->swsCtx = sws_getContext(d->frame->width, d->frame->height, AV_PIX_FMT_YUV420P,
+    //         d->dstFrame->width, d->dstFrame->height, d->dstFrame->format, SWS_BILINEAR, NULL, NULL, NULL);
+    //     if (d->swsCtx == NULL) {
+    //         fprintf(stderr, "sws_getContext() failed\n");
+    //         return -1;
+    //     }
+    //
+    //     // dstFrameSize := av_image_get_buffer_size((int32)(d->dstFrame->format), d->dstFrame->width, d->dstFrame->height, 1);
+    //     // d->dstFramePtr = (*[1 << 30]uint8)(unsafe.Pointer(d->dstFrame->data[0]))[:dstFrameSize:dstFrameSize];
+    // }
+    //
+    // // convert color space from YUV420 to RGBA
+    // ret = sws_scale(d->swsCtx, (const uint8_t * const *)d->frame->data, d->frame->linesize,
+    //     0, d->frame->height, d->dstFrame->data, d->dstFrame->linesize);
+    // if (ret < 0) {
+    //     fprintf(stderr, "sws_scale() failed\n");
+    //     return -1;
+    // }
+
+    fprintf(stderr, "decode ret 0\n");
+    return 0;
+}
+
+static void decode_nalu(struct Decoder* d, long size, uint8_t *data,
+                   const char *filename) {
+    AVPacket *pkt;
+    pkt = av_packet_alloc();
+    if (!pkt)
+        return;
+    pkt->size = size;
+    pkt->data = data;
+
+    fprintf(stderr, "sps: %d\n", pkt->size);
+    decode(d, pkt, filename);
+    fprintf(stderr, "d->frame 2 height %d width %d.\n", d->frame->height, d->frame->width);
+
+    av_packet_unref(pkt);
+}
 
 static void dump(long len, uint8_t* buffer) {
     size_t i;
@@ -82,9 +232,6 @@ static int read_file_full(const char* filename, long* fileSize, uint8_t** buffer
         return -1;
     }
 
-    fprintf(stderr, "fileSize: %ld\n", (size_t)*fileSize);
-    fprintf(stderr, "strlen: %ld\n", strlen(*buffer));
-
     (*buffer)[0] = 0;
     (*buffer)[1] = 0;
     (*buffer)[2] = 0;
@@ -107,70 +254,96 @@ static void pgm_save(unsigned char *buf, int wrap, int xsize, int ysize,
         fwrite(buf + i * wrap, 1, xsize, f);
     fclose(f);
 }
-
-static void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVPacket *pkt,
-                   const char *filename)
+static void encode(AVCodecContext *enc_ctx, AVFrame *frame, AVPacket *pkt,
+                   FILE *outfile)
 {
-    char filename_buf[1024];
     int ret;
 
-    dump(pkt->size, pkt->data);
+    /* send the frame to the encoder */
+    if (frame)
+        printf("Send frame %3"PRId64"\n", frame->pts);
 
-    fprintf(stderr, "avcodec_send_packet\n");
-    ret = avcodec_send_packet(dec_ctx, pkt);
-    fprintf(stderr, "avcodec_send_packet2\n");
+    ret = avcodec_send_frame(enc_ctx, frame);
     if (ret < 0) {
-        fprintf(stderr, "Error sending a packet for decoding: %d\n", ret);
-        // exit(1);
-        return;
+        fprintf(stderr, "Error sending a frame for encoding\n");
+        exit(1);
     }
 
-    fprintf(stderr, "ret %d\n", ret);
     while (ret >= 0) {
-        ret = avcodec_receive_frame(dec_ctx, frame);
+        ret = avcodec_receive_packet(enc_ctx, pkt);
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
             return;
         else if (ret < 0) {
-            fprintf(stderr, "Error during decoding\n");
+            fprintf(stderr, "Error during encoding\n");
             exit(1);
         }
 
-        printf("saving frame %3"PRId64"\n", dec_ctx->frame_num);
-        fflush(stdout);
-
-        /* the picture is allocated by the decoder. no need to
-           free it */
-        snprintf(filename_buf, sizeof(filename_buf),
-                 "%s-%"PRId64, filename, dec_ctx->frame_num);
-        fprintf(stderr, "pgm_save %s\n", filename);
-        pgm_save(frame->data[0], frame->linesize[0],
-                 frame->width, frame->height, filename_buf);
+        printf("Write packet %3"PRId64" (size=%5d)\n", pkt->pts, pkt->size);
+        fwrite(pkt->data, 1, pkt->size, outfile);
+        av_packet_unref(pkt);
     }
 }
+static int jpeg_save(struct Decoder* d, int frameNo) {
+    const AVCodec *jpegCodec;
+    AVCodecContext *jpegContext;
+    FILE *jpegFile;
+    char jpegFilename[256];
+    AVPacket *pkt;
 
-// void prepend(long len, uint8_t* s, long pre_len, const uint8_t* pre) {
-//     memmove(s + pre_len, s, len); // Move the original string to make space for the new string
-//     memcpy(s, pre, len); // Copy the new string into the buffer
-// }
-// void copy(unsigned *restrict const dst, unsigned const *restrict const src, unsigned long n)
-// {
-//     for (unsigned long x = 0; x < n; ++x)
-//     {
-//         dst[x] = src[x];
-//     }
-// }
+    jpegCodec = avcodec_find_encoder(AV_CODEC_ID_MJPEG);
+    if (!jpegCodec) {
+        fprintf(stderr, "[ERROR] MJPEG codec not found.\n");
+        return -1;
+    }
+    jpegContext = avcodec_alloc_context3(jpegCodec);
+    if (!jpegContext) {
+        fprintf(stderr, "[ERROR] Failed to allocate jpeg codec context.\n");
+        return -1;
+    }
+    jpegContext->pix_fmt = d->c->pix_fmt;
+    fprintf(stderr, "time_base before %d %d.\n", jpegContext->time_base.num, jpegContext->time_base.den);
+    jpegContext->time_base = (AVRational){1,1};;
+    fprintf(stderr, "time_base after %d %d.\n", jpegContext->time_base.num, jpegContext->time_base.den);
+    fprintf(stderr, "height %d width %d.\n", d->frame->height, d->frame->width);
+    jpegContext->height = d->frame->height;
+    jpegContext->width = d->frame->width;
+
+    if (avcodec_open2(jpegContext, jpegCodec, NULL) < 0) {
+        fprintf(stderr, "eroar!!! 01.\n");
+        return -1;
+    }
+
+    pkt = av_packet_alloc();
+    if (!pkt){
+        fprintf(stderr, "eroar!!! 02.\n");
+        return -1;
+    }
+
+    // if (avcodec_encode_video2(jpegContext, pkt, pFrame, &gotFrame) < 0) {
+    //     return -1;
+    // }
+
+    sprintf(jpegFilename, "dvr-%06d.jpg", frameNo);
+    jpegFile = fopen(jpegFilename, "wb");
+    encode(jpegContext, d->frame, pkt, jpegFile);
+    // fwrite(pkt->data, 1, pkt->size, jpegFile);
+    fclose(jpegFile);
+
+    av_packet_unref(pkt);
+    avcodec_free_context(&jpegContext);
+    return 0;
+}
 
 int main(int argc, char **argv)
 {
     const char *filename, *outfilename;
-    const AVCodec *codec;
-    AVCodecContext *c= NULL;
-    AVFrame *frame;
+    struct Decoder d;
+    // AVCodecContext *c= NULL;
+    // AVFrame *frame;
     long fileSize;
     uint8_t *data;
     int ret;
-    // AVPacket avPkt;
-    AVPacket *pkt;
+    // AVPacket *pkt;
     // 00000000  00 00 00 01 67 4d 40 2a  8d 8d 20 0f 00 44 fc b8  |....gM@*.. ..D..|
     // 00000010  0b 70 10 10 10 20                                 |.p... |
     char sps[] = {  0x00, 0x00, 0x00, 0x01, 0x67, 0x4d, 0x40, 0x2a,
@@ -178,6 +351,8 @@ int main(int argc, char **argv)
                     0x0b, 0x70, 0x10, 0x10, 0x10, 0x20 };
     // 00000000  00 00 00 01 68 ee 38 80                           |....h.8.|
     char pps[] = {  0x00, 0x00, 0x00, 0x01, 0x68, 0xee, 0x38, 0x80 };
+
+
 
     if (argc <= 2) {
         fprintf(stderr, "Usage: %s <input file> <output file>\n"
@@ -187,49 +362,12 @@ int main(int argc, char **argv)
     filename    = argv[1];
     outfilename = argv[2];
 
-    pkt = av_packet_alloc();
-    if (!pkt)
-        exit(1);
+    decoder_init(&d);
 
-
-    /* find the MPEG-1 video decoder */
-    codec = avcodec_find_decoder(AV_CODEC_ID_H264);
-    if (!codec) {
-        fprintf(stderr, "Codec not found\n");
-        exit(1);
-    }
-
-    c = avcodec_alloc_context3(codec);
-    if (!c) {
-        fprintf(stderr, "Could not allocate video codec context\n");
-        exit(1);
-    }
-
-    /* For some codecs, such as msmpeg4 and mpeg4, width and height
-       MUST be initialized there because this information is not
-       available in the bitstream. */
-
-    /* open it */
-    if (avcodec_open2(c, codec, NULL) < 0) {
-        fprintf(stderr, "Could not open codec\n");
-        exit(1);
-    }
-
-    frame = av_frame_alloc();
-    if (!frame) {
-        fprintf(stderr, "Could not allocate video frame\n");
-        exit(1);
-    }
-
-    pkt->size = sizeof(sps);
-    pkt->data = sps;
-    fprintf(stderr, "sps: %d\n", pkt->size);
-    decode(c, frame, pkt, outfilename);
-
-    pkt->size = sizeof(pps);
-    pkt->data = pps;
-    fprintf(stderr, "pps: %d\n", pkt->size);
-    decode(c, frame, pkt, outfilename);
+    fprintf(stderr, "sps\n");
+    decode_nalu(&d, sizeof(sps), sps, outfilename);
+    fprintf(stderr, "pps\n");
+    decode_nalu(&d, sizeof(pps), pps, outfilename);
 
     ret = read_file_full(filename, &fileSize, &data);
     if (ret < 0) {
@@ -237,13 +375,12 @@ int main(int argc, char **argv)
         exit(1);
     }
     fprintf(stderr, "data\n");
-    pkt->size = fileSize;
-    pkt->data = data;
-    decode(c, frame, pkt, outfilename);
+    decode_nalu(&d, fileSize, data, outfilename);
 
-    avcodec_free_context(&c);
-    av_frame_free(&frame);
-    av_packet_free(&pkt);
+    fprintf(stderr, "d->frame 3 height %d width %d.\n", d.frame->height, d.frame->width);
+    jpeg_save(&d, 1);
+
+    decoder_free(&d);
 
     return 0;
 }
