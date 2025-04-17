@@ -28,13 +28,14 @@
  * output.
  */
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <libavcodec/avcodec.h>
 #include <libswscale/swscale.h>
-#include <libavcodec/mjpeg.h>
+#include <libavutil/imgutils.h>
 
 #include "decode_video.h"
 
@@ -78,7 +79,7 @@ static int read_file_full(const char* filename, long* fileSize, uint8_t** buffer
     }
 
     // Read the file into the buffer.
-// Leave 4 bytes in front for 0x00 0x00 0x00 0x01 prefix
+    // Leave 4 bytes in front for 0x00 0x00 0x00 0x01 prefix
     bytesRead = fread(*buffer+4, 1, ((size_t)*fileSize)-4, file);
     if (bytesRead != ((size_t)*fileSize)-4) {
         fprintf(stderr, "[ERROR] Failed to read file into buffer. %ld != %ld\n", bytesRead, (size_t)*fileSize);
@@ -112,23 +113,22 @@ static void pgm_save(unsigned char *buf, int wrap, int xsize, int ysize,
 static void encode(AVCodecContext *enc_ctx, AVFrame *frame, AVPacket *pkt,
                    FILE *outfile)
 {
-    int ret;
+    int status;
 
-    /* send the frame to the encoder */
     if (frame)
         printf("Send frame %3"PRId64"\n", frame->pts);
 
-    ret = avcodec_send_frame(enc_ctx, frame);
-    if (ret < 0) {
+    status = avcodec_send_frame(enc_ctx, frame);
+    if (status < 0) {
         fprintf(stderr, "Error sending a frame for encoding\n");
         exit(1);
     }
 
-    while (ret >= 0) {
-        ret = avcodec_receive_packet(enc_ctx, pkt);
-        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+    while (status >= 0) {
+        status = avcodec_receive_packet(enc_ctx, pkt);
+        if (status == AVERROR(EAGAIN) || status == AVERROR_EOF)
             return;
-        else if (ret < 0) {
+        else if (status < 0) {
             fprintf(stderr, "Error during encoding\n");
             exit(1);
         }
@@ -138,12 +138,14 @@ static void encode(AVCodecContext *enc_ctx, AVFrame *frame, AVPacket *pkt,
         av_packet_unref(pkt);
     }
 }
-static int jpeg_save(struct VDecoder* d, int frameNo) {
+static int jpeg_save(struct VDecoder* d, const char* filename) {
+    AVFrame *frame;
     const AVCodec *jpegCodec;
     AVCodecContext *jpegContext;
     FILE *jpegFile;
-    char jpegFilename[256];
     AVPacket *pkt;
+
+    frame = d->frame;
 
     jpegCodec = avcodec_find_encoder(AV_CODEC_ID_MJPEG);
     if (!jpegCodec) {
@@ -156,38 +158,63 @@ static int jpeg_save(struct VDecoder* d, int frameNo) {
         return -1;
     }
     jpegContext->pix_fmt = d->c->pix_fmt;
-    fprintf(stderr, "time_base before %d %d.\n", jpegContext->time_base.num, jpegContext->time_base.den);
-    jpegContext->time_base = (AVRational){1,1};;
-    fprintf(stderr, "time_base after %d %d.\n", jpegContext->time_base.num, jpegContext->time_base.den);
-    fprintf(stderr, "height %d width %d.\n", d->frame->height, d->frame->width);
-    jpegContext->height = d->frame->height;
-    jpegContext->width = d->frame->width;
+    jpegContext->time_base = (AVRational){1,1};
+    jpegContext->height = frame->height;
+    jpegContext->width = frame->width;
 
     if (avcodec_open2(jpegContext, jpegCodec, NULL) < 0) {
-        fprintf(stderr, "eroar!!! 01.\n");
+        fprintf(stderr, "[ERROR] avcodec_open2 failed\n");
         return -1;
     }
 
     pkt = av_packet_alloc();
-    if (!pkt){
-        fprintf(stderr, "eroar!!! 02.\n");
+    if (!pkt) {
+        fprintf(stderr, "[ERROR] av_packet_alloc failed\n");
         return -1;
     }
 
-    // if (avcodec_encode_video2(jpegContext, pkt, pFrame, &gotFrame) < 0) {
-    //     return -1;
-    // }
-
-    sprintf(jpegFilename, "dvr-%06d.jpg", frameNo);
-    jpegFile = fopen(jpegFilename, "wb");
-    encode(jpegContext, d->frame, pkt, jpegFile);
-    // fwrite(pkt->data, 1, pkt->size, jpegFile);
+    jpegFile = fopen(filename, "wb");
+    encode(jpegContext, frame, pkt, jpegFile);
     fclose(jpegFile);
 
     av_packet_unref(pkt);
     avcodec_free_context(&jpegContext);
     return 0;
 }
+
+// NOTE: this function doesn't work... it saves data, but not a png file.
+static
+void png_save(struct VDecoder* d, const char* filename) {
+    int bufferOutputSize;
+    uint8_t *bufferOutput;
+    FILE *fp;
+
+    // Allocate an AVFrame and set its format and size
+    bufferOutputSize = av_image_get_buffer_size(AV_PIX_FMT_RGBA,
+                                                d->frame_rgb->width,
+                                                d->frame_rgb->height,
+                                                1);
+    bufferOutput = (uint8_t *)av_malloc(bufferOutputSize);
+    av_image_fill_arrays(d->frame_rgb->data,
+                         d->frame_rgb->linesize,
+                         bufferOutput,
+                         AV_PIX_FMT_RGBA,
+                         d->frame_rgb->width,
+                         d->frame_rgb->height,
+                         1);
+
+    // Copy the data from the original AVFrame to the new RGB AVFrame
+    // This step depends on the original format and may require using sws_scale for conversion
+
+    // Create a PNG file and write the RGB data to it
+    fp = fopen(filename, "wb");
+    fwrite(bufferOutput, 1, bufferOutputSize, fp);
+    fclose(fp);
+
+    // Free the allocated buffer and AVFrame
+    av_freep(&bufferOutput);
+}
+
 
 int main(int argc, char **argv)
 {
@@ -197,7 +224,7 @@ int main(int argc, char **argv)
     // AVFrame *frame;
     long fileSize;
     uint8_t *data;
-    int ret;
+    int status;
     // AVPacket *pkt;
     // 00000000  00 00 00 01 67 4d 40 2a  8d 8d 20 0f 00 44 fc b8  |....gM@*.. ..D..|
     // 00000010  0b 70 10 10 10 20                                 |.p... |
@@ -223,16 +250,24 @@ int main(int argc, char **argv)
     fprintf(stderr, "pps\n");
     decode(&d, sizeof(pps), pps);
 
-    ret = read_file_full(filename, &fileSize, &data);
-    if (ret < 0) {
+    status = read_file_full(filename, &fileSize, &data);
+    if (status < 0) {
         fprintf(stderr, "[ERROR] Reading entire file\n");
         exit(1);
     }
     fprintf(stderr, "data\n");
     decode(&d, fileSize, data);
 
-    fprintf(stderr, "d->frame 3 height %d width %d.\n", d.frame->height, d.frame->width);
-    jpeg_save(&d, 1);
+    // if (decode_rgb(&d) < 0) {
+    //     fprintf(stderr, "[ERROR] decode_rgb failed\n");
+    // }
+
+    fprintf(stderr, "d->frame height %d width %d.\n", d.frame->height, d.frame->width);
+    jpeg_save(&d, "output.jpg");
+
+
+    // fprintf(stderr, "d->frame_rgb height %d width %d.\n", d.frame_rgb->height, d.frame_rgb->width);
+    // png_save(&d, "output.png");
 
     decoder_free(&d);
 
@@ -268,8 +303,19 @@ int decoder_init(struct VDecoder* d) {
     return 0;
 }
 void decoder_free(struct VDecoder* d) {
-    avcodec_free_context(&d->c);
-    av_frame_free(&d->frame);
+    if (d->c != NULL) {
+        avcodec_free_context(&d->c);
+    }
+    if (d->frame != NULL) {
+        av_frame_free(&d->frame);
+    }
+
+    // if (d->frame_rgb != NULL) {
+    //     av_frame_free(&f);
+    // }
+    // if (d->sws_context != NULL) {
+    //     sws_freeContext(d->sws_context);
+    // }
 }
 
 static
@@ -284,7 +330,7 @@ int decode_packet(struct VDecoder *d, AVPacket *pkt) {
 }
 
 int decode(struct VDecoder* d, long size, uint8_t *data) {
-    int ret;
+    int status;
     AVPacket *pkt;
     pkt = av_packet_alloc();
     if (!pkt)
@@ -292,10 +338,87 @@ int decode(struct VDecoder* d, long size, uint8_t *data) {
     pkt->size = size;
     pkt->data = data;
 
-    ret = decode_packet(d, pkt);
-    fprintf(stderr, "d->frame 2 height %d width %d.\n", d->frame->height, d->frame->width);
+    status = decode_packet(d, pkt);
 
     av_packet_unref(pkt);
 
-    return ret;
+    return status;
+}
+
+static AVFrame *
+allocate_rgb_image(AVCodecContext *codec_context)
+{
+    int32_t status;
+    AVFrame *frame_rgb;
+
+    frame_rgb = av_frame_alloc();
+    if (frame_rgb == NULL) {
+        return NULL;
+    }
+
+    frame_rgb->format = AV_PIX_FMT_RGBA;
+    frame_rgb->width = codec_context->width;
+    frame_rgb->height = codec_context->height;
+
+    status = av_image_alloc(frame_rgb->data,
+                            frame_rgb->linesize,
+                            frame_rgb->width,
+                            frame_rgb->height,
+                            AV_PIX_FMT_RGBA,
+                            32);
+    if (status < 0) {
+        av_frame_free(&frame_rgb);
+        return NULL;
+    }
+
+    return frame_rgb;
+}
+
+// NOTE: not sure if this function works...
+int decode_rgb(struct VDecoder* d)
+{
+    int status;
+
+    if (d->frame_rgb == NULL ||
+        d->frame_rgb->width != d->frame->width ||
+        d->frame_rgb->height != d->frame->height) {
+
+        // Recreate rgb frame.
+        if (d->frame_rgb != NULL) {
+            av_frame_free(&d->frame_rgb);
+        }
+        d->frame_rgb = allocate_rgb_image(d->c);
+        assert(d->frame_rgb != NULL);
+
+        // Recreate sws context.
+        if (d->sws_context != NULL) {
+            sws_freeContext(d->sws_context);
+        }
+        d->sws_context = sws_getContext(d->c->width,
+                                     d->c->height,
+                                     d->c->pix_fmt,
+                                     d->c->width,
+                                     d->c->height,
+                                     AV_PIX_FMT_RGBA,
+                                     SWS_BILINEAR,
+                                     NULL,
+                                     NULL,
+                                     NULL);
+        assert(d->sws_context != NULL);
+    }
+
+    // convert color space from YUV420 to RGBA
+    status = sws_scale(d->sws_context,
+                        (const uint8_t * const *)(d->frame->data),
+                        d->frame->linesize,
+                        0,
+                        d->c->height,
+                        d->frame_rgb->data,
+                        d->frame_rgb->linesize);
+
+    return status;
+
+    // av_freep(d->frame_rgb->data);
+    // av_frame_free(&frame_rgb);
+    // sws_freeContext(sws_context);
 }

@@ -13,7 +13,6 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 // #include <libavutil/imgutils.h>
 #include <libswscale/swscale.h>
-// #include <libavcodec/mjpeg.h>
 
 #ifdef __cplusplus
 };
@@ -30,10 +29,15 @@ extern "C" {
 struct VDecoder {
     AVCodecContext *c;
     AVFrame *frame;
+
+    AVFrame *frame_rgb;
+    struct SwsContext *sws_context;
 } VDecoder;
 
 int decoder_init(struct VDecoder* d);
 void decoder_free(struct VDecoder* d);
 int decode(struct VDecoder* d, long size, uint8_t *data);
+
+int decode_rgb(struct VDecoder* d);
 
 #endif // _VIDEO_DECODER_H_
